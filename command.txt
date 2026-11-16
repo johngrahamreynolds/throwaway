@@ -39,3 +39,23 @@ evalrun E003-mz-S2-s4 2 50;        evalrun E003-mz-S4-s4 3 52
 
 Afterwards:
 Check grep -H '"status"' runs/E003-eval-*/run.json on each machine.
+
+
+python3 -I - runs <<'EOF'
+import json, sys
+from pathlib import Path
+train, evals = {}, {}
+for f in Path(sys.argv[1]).glob("E003-*/run.json"):
+    r = json.loads(f.read_text())
+    if r["tags"].get("kind") == "evaluation":
+        evals.setdefault(r["tags"]["source_run"], []).append(r["status"])
+    elif r["status"] == "completed":
+        train[(r["name"], r["seed"])] = r["run_id"]
+missing = 0
+for (name, seed), rid in sorted(train.items()):
+    st = evals.get(rid, [])
+    ok = "completed" in st
+    missing += not ok
+    print(f"{'ok ' if ok else 'MISSING'}  {name:<20} s{seed}  eval: {', '.join(st) or 'none'}")
+print(f"\n{len(train)} completed training runs, {missing} without a completed evaluation")
+EOF
