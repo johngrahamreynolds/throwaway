@@ -1,18 +1,7 @@
-
-docker run -d --rm --name tb --user "$(id -u):$(id -g)" \
-  -p 127.0.0.1:6006:6006 -v "$PWD/runs:/runs:ro" \
-  chance-2048-lz:0.2 tensorboard --logdir /runs --host 0.0.0.0 --port 6006
-
-scripts/launch.sh --image chance-2048-lz:0.2 --cpus 59 --name dv3-tb-tests -- \
-  python -m pytest tests/test_dv3_to_tb.py tests/test_dreamer_env.py
-
-scripts/launch.sh --image chance-2048-lz:0.2 --cpus 59 --name dv3-tb --detach -- \
-  python -m chance2048.dv3_to_tb --follow runs
-
-for i in 0 1; do
-  c=$((4*i)); scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 \
-    --cpus $c-$((c+3)),$((c+60))-$((c+63)) --env XLA_PYTHON_CLIENT_MEM_FRACTION=0.3 \
-    --name E004-dv3-share-$i --detach -- \
-    python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml --level S2 \
-      --seed $((100+i)) --exp E004 --max-env-step 50000 --set name=dv3-share
+for g in 0 1 2 3; do
+  c=$((4*g))
+  scripts/launch.sh --image chance-2048-dv3:0.1 --gpus $g \
+    --cpus $c-$((c+3)),$((c+60))-$((c+63)) --name E003-dv3-S$g-s0 --detach -- \
+    python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml \
+      --level S$g --seed 0 --exp E003
 done
