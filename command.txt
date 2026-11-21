@@ -13,3 +13,6 @@ scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0-3,60-63 --name E
     --seed 100 --exp E004 --max-env-step 50000 --set name=dv3-time
 
 grep -E 'fps/(policy|train)' runs/E004-dv3-time-*/metrics_dv3.csv | tail -4
+
+scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0-3,60-63 --name E004-dv3-time-eval -- \
+  python -m chance2048.evaluate_dreamerv3 --run runs/E004-dv3-time-S2-s100-20261121T163927Z
