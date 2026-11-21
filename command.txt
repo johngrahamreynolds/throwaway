@@ -1,14 +1,15 @@
-
-scripts/launch.sh --image chance-2048-lz:0.2 --cpus 0,1,60,61 --name E003-floors \
-  -- bash -c 'for arm in random greedy; do for level in S0 S1 S2 S3 S4; do
-       for seed in 0 1 2 3 4; do
-         python -m chance2048.baselines --config configs/$arm.yaml \
-           --level $level --seed $seed --exp E003 || exit 1
-       done; done; done'
+docker build -f docker/Dockerfile.dreamerv3 -t chance-2048-dv3:0.1 .
 
 
-grep -l '"kind": "baseline"' runs/E003-*/run.json | xargs grep -h '"status"' | sort | uniq -c
+scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0,60 --name dv3-gpu -- \
+  python -c "import jax, jax.numpy as jnp; print(jax.devices()); print(float((jnp.ones((1024,1024)) @ jnp.ones((1024,1024))).sum()))"
 
 
-read -rs HF_TOKEN && export HF_TOKEN
-scripts/launch.sh --image chance-2048-lz:0.2 --name E003-sync -- python scripts/sync_hf.py push
+scripts/launch.sh --image chance-2048-dv3:0.1 --cpus 0-3,60-63 --name dv3-tests -- python -m pytest
+
+
+scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0-3,60-63 --name E004-dv3-time -- \
+  python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml --level S2 \
+    --seed 100 --exp E004 --max-env-step 50000 --set name=dv3-time
+
+grep -E 'fps/(policy|train)' runs/E004-dv3-time-*/metrics_dv3.csv | tail -4
