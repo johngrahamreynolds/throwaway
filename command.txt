@@ -1,18 +1,18 @@
-docker build -f docker/Dockerfile.dreamerv3 -t chance-2048-dv3:0.1 .
 
+docker run -d --rm --name tb --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:6006:6006 -v "$PWD/runs:/runs:ro" \
+  chance-2048-lz:0.2 tensorboard --logdir /runs --host 0.0.0.0 --port 6006
 
-scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0,60 --name dv3-gpu -- \
-  python -c "import jax, jax.numpy as jnp; print(jax.devices()); print(float((jnp.ones((1024,1024)) @ jnp.ones((1024,1024))).sum()))"
+scripts/launch.sh --image chance-2048-lz:0.2 --cpus 59 --name dv3-tb-tests -- \
+  python -m pytest tests/test_dv3_to_tb.py tests/test_dreamer_env.py
 
+scripts/launch.sh --image chance-2048-lz:0.2 --cpus 59 --name dv3-tb --detach -- \
+  python -m chance2048.dv3_to_tb --follow runs
 
-scripts/launch.sh --image chance-2048-dv3:0.1 --cpus 0-3,60-63 --name dv3-tests -- python -m pytest
-
-
-scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0-3,60-63 --name E004-dv3-time -- \
-  python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml --level S2 \
-    --seed 100 --exp E004 --max-env-step 50000 --set name=dv3-time
-
-grep -E 'fps/(policy|train)' runs/E004-dv3-time-*/metrics_dv3.csv | tail -4
-
-scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 --cpus 0-3,60-63 --name E004-dv3-time-eval -- \
-  python -m chance2048.evaluate_dreamerv3 --run runs/E004-dv3-time-S2-s100-20261121T163927Z
+for i in 0 1; do
+  c=$((4*i)); scripts/launch.sh --image chance-2048-dv3:0.1 --gpus 0 \
+    --cpus $c-$((c+3)),$((c+60))-$((c+63)) --env XLA_PYTHON_CLIENT_MEM_FRACTION=0.3 \
+    --name E004-dv3-share-$i --detach -- \
+    python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml --level S2 \
+      --seed $((100+i)) --exp E004 --max-env-step 50000 --set name=dv3-share
+done
