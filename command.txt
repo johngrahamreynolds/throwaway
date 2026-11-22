@@ -5,3 +5,57 @@ for g in 0 1 2 3; do
     python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml \
       --level S$g --seed 0 --exp E003
 done
+
+
+
+#!/usr/bin/env bash
+# One GPU's share of E003's DreamerV3 runs (ADR-012).
+#   dv3-queue.sh GPU
+# Waits for the hand-started run on this GPU (S<GPU> at seed 0) and evaluates
+# it, then trains and evaluates the rest of its share in turn: runs are taken
+# seed by seed, level by level, and GPU g gets every 4th. GPU g uses cores
+# 4g..4g+3 and their hyperthreads. A run that does not complete is not
+# evaluated, and the queue moves on.
+set -u
+cd "${PROJECT_DIR:-$HOME/research/chance-2048}"
+g=$1; c=$((4*g)); cpus="$c-$((c+3)),$((c+60))-$((c+63))"
+image=chance-2048-dv3:0.1
+
+latest() { ls -d runs/E003-dreamerv3-$1-s$2-* 2>/dev/null | tail -1; }
+
+evaluate() {  # LEVEL SEED, if its training completed
+  local run; run=$(latest "$1" "$2")
+  if [[ -n "$run" ]] && grep -q '"status": "completed"' "$run/run.json"; then
+    scripts/launch.sh --image $image --gpus "$g" --cpus "$cpus" \
+      --name "E003-dv3-$1-s$2-eval" -- python -m chance2048.evaluate_dreamerv3 --run "$run"
+  else
+    echo "$(date -u +%FT%TZ) $1 s$2 did not complete; not evaluated"
+  fi
+}
+
+echo "$(date -u +%FT%TZ) waiting for E003-dv3-S$g-s0"
+while docker container inspect "E003-dv3-S$g-s0" >/dev/null 2>&1; do sleep 60; done
+evaluate "S$g" 0
+
+i=0
+for seed in 0 1 2 3 4; do
+  for level in S0 S1 S2 S3 S4; do
+    if (( i >= 4 && i % 4 == g )); then
+      scripts/launch.sh --image $image --gpus "$g" --cpus "$cpus" \
+        --name "E003-dv3-$level-s$seed" -- \
+        python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml \
+          --level "$level" --seed "$seed" --exp E003
+      evaluate "$level" "$seed"
+    fi
+    i=$((i+1))
+  done
+done
+echo "$(date -u +%FT%TZ) GPU $g queue done"
+
+
+
+chmod +x ~/dv3-queue.sh
+tmux new -s dv3
+#   inside tmux:
+for g in 0 1 2 3; do ~/dv3-queue.sh $g > runs/_logs/E003-dv3-queue-$g.log 2>&1 & done
+#   detach with Ctrl-b d; reattach with `tmux attach -t dv3`
