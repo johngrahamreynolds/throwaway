@@ -29,3 +29,22 @@ for r in runs/E004-ppo-{64,256,512}-*; do
     python -m chance2048.evaluate_ppo --run $r
   core=$((core+1))
 done
+
+---
+
+core=40
+for r in runs/E004-ppo-{64,256,512}-*; do
+  run --cpus $core,$((core+60)) --name eval-$(basename $r) --detach -- \
+    python -m chance2048.evaluate_ppo --run $r
+  core=$((core+1))
+done
+
+
+grep -H -E '"(duration_s|env_steps)"' runs/E004-ppo-*/run.json
+python3 -I - <<'EOF'
+import glob, json
+for p in sorted(glob.glob("runs/E004-eval-ppo-*/run.json")):
+    e = json.load(open(p)); src = e["tags"]["source_run"]
+    c = json.load(open(f"runs/{src}/run.json"))["config"]
+    print(src, c["net_arch"], c["reward"], e["status"], e.get("summary", {}).get("eval_score_mean"))
+EOF
