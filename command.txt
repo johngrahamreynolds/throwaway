@@ -1,61 +1,31 @@
-for g in 0 1 2 3; do
-  c=$((4*g))
-  scripts/launch.sh --image chance-2048-dv3:0.1 --gpus $g \
-    --cpus $c-$((c+3)),$((c+60))-$((c+63)) --name E003-dv3-S$g-s0 --detach -- \
-    python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml \
-      --level S$g --seed 0 --exp E003
+cd ~/research/chance-2048 && git status -sb      # ppo-arm, clean, at 1a49f2b
+docker build -f docker/Dockerfile.ppo -t chance-2048-ppo:0.1 .
+scripts/launch.sh --image chance-2048-ppo:0.1 --cpus 40-43,100-103 --name ppo-tests -- python -m pytest
+
+run() { scripts/launch.sh --image chance-2048-ppo:0.1 "$@"; }
+
+
+args="python -m chance2048.train_ppo --config configs/ppo.yaml --level S2 --seed 100 \
+  --exp E004 --max-env-step 200000"
+run --cpus 52,112 --name E004-ppo-dummy --detach -- $args --set name=ppo-time-dummy
+run --cpus 53-55,113-115 --name E004-ppo-subproc --detach -- $args \
+  --set name=ppo-time-subproc --set vec_env=subproc
+
+
+core=40
+for arch in 64 256 512; do for reward in normalize log2; do for seed in 100 101; do
+  run --cpus $core,$((core+60)) --name E004-ppo-$arch-$reward-s$seed --detach -- \
+    python -m chance2048.train_ppo --config configs/ppo.yaml --level S2 \
+      --seed $seed --exp E004 --set name=ppo-$arch-$reward \
+      --set "net_arch=[$arch, $arch]" --set reward=$reward
+  core=$((core+1))
+done; done; done
+
+docker ps --filter name=E004-ppo
+
+core=40
+for r in runs/E004-ppo-{64,256,512}-*; do
+  run --cpus $core,$((core+60)) --name eval-$(basename $r) --detach -- \
+    python -m chance2048.evaluate_ppo --run $r
+  core=$((core+1))
 done
-
-
-
-#!/usr/bin/env bash
-# One GPU's share of E003's DreamerV3 runs (ADR-012).
-#   dv3-queue.sh GPU
-# Waits for the hand-started run on this GPU (S<GPU> at seed 0) and evaluates
-# it, then trains and evaluates the rest of its share in turn: runs are taken
-# seed by seed, level by level, and GPU g gets every 4th. GPU g uses cores
-# 4g..4g+3 and their hyperthreads. A run that does not complete is not
-# evaluated, and the queue moves on.
-set -u
-cd "${PROJECT_DIR:-$HOME/research/chance-2048}"
-g=$1; c=$((4*g)); cpus="$c-$((c+3)),$((c+60))-$((c+63))"
-image=chance-2048-dv3:0.1
-
-latest() { ls -d runs/E003-dreamerv3-$1-s$2-* 2>/dev/null | tail -1; }
-
-evaluate() {  # LEVEL SEED, if its training completed
-  local run; run=$(latest "$1" "$2")
-  if [[ -n "$run" ]] && grep -q '"status": "completed"' "$run/run.json"; then
-    scripts/launch.sh --image $image --gpus "$g" --cpus "$cpus" \
-      --name "E003-dv3-$1-s$2-eval" -- python -m chance2048.evaluate_dreamerv3 --run "$run"
-  else
-    echo "$(date -u +%FT%TZ) $1 s$2 did not complete; not evaluated"
-  fi
-}
-
-echo "$(date -u +%FT%TZ) waiting for E003-dv3-S$g-s0"
-while docker container inspect "E003-dv3-S$g-s0" >/dev/null 2>&1; do sleep 60; done
-evaluate "S$g" 0
-
-i=0
-for seed in 0 1 2 3 4; do
-  for level in S0 S1 S2 S3 S4; do
-    if (( i >= 4 && i % 4 == g )); then
-      scripts/launch.sh --image $image --gpus "$g" --cpus "$cpus" \
-        --name "E003-dv3-$level-s$seed" -- \
-        python -m chance2048.train_dreamerv3 --config configs/dreamerv3.yaml \
-          --level "$level" --seed "$seed" --exp E003
-      evaluate "$level" "$seed"
-    fi
-    i=$((i+1))
-  done
-done
-echo "$(date -u +%FT%TZ) GPU $g queue done"
-
-
-
-chmod +x ~/dv3-queue.sh
-tmux new -s dv3
-#   inside tmux:
-for g in 0 1 2 3; do ~/dv3-queue.sh $g > runs/_logs/E003-dv3-queue-$g.log 2>&1 & done
-#   detach with Ctrl-b d; reattach with `tmux attach -t dv3`
