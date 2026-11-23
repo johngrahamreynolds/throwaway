@@ -1,50 +1,21 @@
-cd ~/research/chance-2048 && git status -sb      # ppo-arm, clean, at 1a49f2b
-docker build -f docker/Dockerfile.ppo -t chance-2048-ppo:0.1 .
-scripts/launch.sh --image chance-2048-ppo:0.1 --cpus 40-43,100-103 --name ppo-tests -- python -m pytest
 
-run() { scripts/launch.sh --image chance-2048-ppo:0.1 "$@"; }
+cd ~/research/chance-2048 && git pull && git status -sb 
+tmux new -s ppo
 
 
-args="python -m chance2048.train_ppo --config configs/ppo.yaml --level S2 --seed 100 \
-  --exp E004 --max-env-step 200000"
-run --cpus 52,112 --name E004-ppo-dummy --detach -- $args --set name=ppo-time-dummy
-run --cpus 53-55,113-115 --name E004-ppo-subproc --detach -- $args \
-  --set name=ppo-time-subproc --set vec_env=subproc
-
-
-core=40
-for arch in 64 256 512; do for reward in normalize log2; do for seed in 100 101; do
-  run --cpus $core,$((core+60)) --name E004-ppo-$arch-$reward-s$seed --detach -- \
-    python -m chance2048.train_ppo --config configs/ppo.yaml --level S2 \
-      --seed $seed --exp E004 --set name=ppo-$arch-$reward \
-      --set "net_arch=[$arch, $arch]" --set reward=$reward
-  core=$((core+1))
-done; done; done
-
-docker ps --filter name=E004-ppo
-
-core=40
-for r in runs/E004-ppo-{64,256,512}-*; do
-  run --cpus $core,$((core+60)) --name eval-$(basename $r) --detach -- \
-    python -m chance2048.evaluate_ppo --run $r
-  core=$((core+1))
+jobs=(); for seed in 0 1 2 3 4; do for level in S0 S1 S2 S3 S4; do jobs+=("$level $seed"); done; done
+for k in $(seq 0 12); do
+  ( core=$((40+k))
+    for ((j=k; j<25; j+=13)); do
+      set -- ${jobs[j]}; level=$1 seed=$2
+      scripts/launch.sh --image chance-2048-ppo:0.1 --cpus $core,$((core+60)) \
+        --name E003-ppo-$level-s$seed -- \
+        python -m chance2048.train_ppo --config configs/ppo.yaml \
+          --level $level --seed $seed --exp E003 \
+      && scripts/launch.sh --image chance-2048-ppo:0.1 --cpus $core,$((core+60)) \
+        --name E003-ppo-$level-s$seed-eval -- \
+        python -m chance2048.evaluate_ppo --run $(ls -d runs/E003-ppo-$level-s$seed-* | tail -1)
+    done ) > ~/research/chance-2048/runs/_logs/E003-ppo-queue-$k.log 2>&1 &
 done
 
----
-
-core=40
-for r in runs/E004-ppo-{64,256,512}-*; do
-  run --cpus $core,$((core+60)) --name eval-$(basename $r) --detach -- \
-    python -m chance2048.evaluate_ppo --run $r
-  core=$((core+1))
-done
-
-
-grep -H -E '"(duration_s|env_steps)"' runs/E004-ppo-*/run.json
-python3 -I - <<'EOF'
-import glob, json
-for p in sorted(glob.glob("runs/E004-eval-ppo-*/run.json")):
-    e = json.load(open(p)); src = e["tags"]["source_run"]
-    c = json.load(open(f"runs/{src}/run.json"))["config"]
-    print(src, c["net_arch"], c["reward"], e["status"], e.get("summary", {}).get("eval_score_mean"))
-EOF
+docker ps --filter name=E003-ppo | wc -l
