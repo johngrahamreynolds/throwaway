@@ -20,6 +20,6 @@ done
 
 docker ps --filter name=E003-ppo | wc -l
 
-
-docker ps -a --filter name='^tb$'
-docker inspect tb --format '{{.Config.Image}} {{json .Config.Cmd}} {{json .HostConfig.PortBindings}} {{json .HostConfig.Binds}} {{.Config.User}}'
+docker run -d --rm --name tb --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:6006:6006 -v "$PWD/runs:/runs:ro" \
+  chance-2048-lz:0.2 tensorboard --logdir /runs --host 0.0.0.0 --port 6006
