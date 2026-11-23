@@ -19,3 +19,7 @@ for k in $(seq 0 12); do
 done
 
 docker ps --filter name=E003-ppo | wc -l
+
+
+docker ps -a --filter name='^tb$'
+docker inspect tb --format '{{.Config.Image}} {{json .Config.Cmd}} {{json .HostConfig.PortBindings}} {{json .HostConfig.Binds}} {{.Config.User}}'
